@@ -93,10 +93,11 @@ class DirectoryTests(unittest.TestCase):
 
         client = FakeClient(handler)
         result = scan_directory(client, self.target, ["restricted", "redirect", "missing", "error"])
-        self.assertEqual([item.status for item in result.findings], ["restricted", "redirect", "not_found", "error"])
+        self.assertEqual([item.status for item in result.findings],
+                         ["restricted", "redirect", "not_found", "server_error"])
         self.assertEqual(result.findings[1].details["location"], "https://elsewhere.example/login")
-        self.assertEqual(result.status, "partial")
-        self.assertEqual(result.checked, 3)
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.checked, 4)
         self.assertEqual(len(client.calls), 6)
 
     def test_invalid_paths_are_rejected_before_network_access(self):

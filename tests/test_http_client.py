@@ -65,6 +65,17 @@ class HttpClientTests(unittest.TestCase):
                     client.post("https://example.com", {"query": "value"})
             self.assertEqual(opened.call_count, 1)
 
+    def test_extra_headers_are_sent_and_validated(self):
+        with HttpClient(retries=0) as client:
+            with patch.object(client._opener, "open", return_value=_Response()) as opened:
+                client.post("https://example.com", {"q": "1"}, headers={"Referer": "https://example.com/p"})
+            request = opened.call_args.args[0]
+            self.assertEqual(request.get_header("Referer"), "https://example.com/p")
+            self.assertTrue(request.get_header("User-agent").startswith("butterfly/"))
+            for bad in ({"Referer": "a\r\nX-Injected: 1"}, {"Bad Name": "x"}):
+                with self.subTest(headers=bad), self.assertRaises(ValueError):
+                    client.get("https://example.com", headers=bad)
+
     def test_retryable_http_status_returns_last_response(self):
         with HttpClient(retries=1) as client:
             with patch.object(client._opener, "open", side_effect=[_Response(status=503), _Response(status=503)]) as opened:

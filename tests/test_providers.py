@@ -17,6 +17,7 @@ class FakeClient:
     def __init__(self, *responses):
         self.responses = iter(responses)
         self.requests = []
+        self.post_headers = []
 
     def _next(self):
         value = next(self.responses)
@@ -24,8 +25,9 @@ class FakeClient:
             raise value
         return value
 
-    def post(self, url, data=None):
+    def post(self, url, data=None, headers=None):
         self.requests.append(("POST", url, data))
+        self.post_headers.append(headers)
         return self._next()
 
     def get(self, url):
@@ -41,6 +43,7 @@ class PortProviderTests(unittest.TestCase):
         self.assertEqual([f.status for f in result.findings], ["open", "closed"])
         self.assertEqual(client.requests[0][2]["data"], "example.com")
         self.assertEqual(client.requests[0][2]["protocol"], "tcp")
+        self.assertEqual(client.post_headers[0], {"Referer": "https://tool.box3.cn/port.html"})
         self.assertTrue(result.warnings)
 
     def test_unknown_or_ambiguous_schema_is_failure_not_closed(self):
@@ -123,6 +126,32 @@ class SubdomainProviderTests(unittest.TestCase):
         self.assertEqual(result.checked, 2)
         self.assertEqual(result.findings, [])
 
+    def test_non_200_records_are_misses_and_do_not_stop_the_scan(self):
+        # phpinfo.me answers unresolved names with status 500 and "ip": null.
+        prefixes = ["mail", "ftp", "smtp", "pop", "www"]
+        misses = [response({"domain": f"{p}.example.com", "status": 500, "ip": None})
+                  for p in prefixes[:-1]]
+        hit = response({"domain": "www.example.com", "status": 200, "ip": "192.0.2.1"})
+        client = FakeClient(*misses, hit)
+        result = query_subdomains(client, parse_target("example.com"), prefixes)
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.checked, 5)
+        self.assertEqual(result.errors, [])
+        self.assertEqual([f.value for f in result.findings], ["www.example.com"])
+
+    def test_non_200_record_with_ip_is_failure(self):
+        payload = {"domain": "www.example.com", "status": 500, "ip": "192.0.2.1"}
+        result = query_subdomains(FakeClient(response(payload)), parse_target("example.com"), ["www"])
+        self.assertEqual(result.status, "failed")
+        self.assertIn("conflicting", result.errors[0])
+
+    def test_www_base_gets_a_hint_about_the_parent_domain(self):
+        client = FakeClient(response([]))
+        result = query_subdomains(client, parse_target("www.example.com"), ["mail"])
+        self.assertTrue(any("pass example.com" in w for w in result.warnings))
+        quiet = query_subdomains(FakeClient(response([])), parse_target("example.com"), ["mail"])
+        self.assertFalse(any("leading www" in w for w in quiet.warnings))
+
     def test_out_of_scope_response_is_failure(self):
         for domain in ("example.com.attacker.test", "notexample.com"):
             result = query_subdomains(FakeClient(response({"domain": domain, "status": 200, "ip": "192.0.2.1"})),
@@ -132,7 +161,6 @@ class SubdomainProviderTests(unittest.TestCase):
 
     def test_malformed_service_response_is_not_no_results(self):
         payloads = ({"error": "maintenance"}, {"data": None},
-                    {"domain": "www.example.com", "status": 500, "ip": None},
                     {"domain": "www.example.com", "status": 200, "ip": None},
                     {"domain": "www.example.com", "status": True, "ip": "192.0.2.1"},
                     {"domain": "www.example.com", "status": 200, "ip": "not-an-ip"})

@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -42,6 +43,23 @@ class OutputTests(unittest.TestCase):
         text = render(make_report([result]))
         self.assertNotIn("\x1b", text)
         self.assertNotIn("\r", text)
+
+    @unittest.skipIf(os.name != "posix", "POSIX file modes")
+    def test_written_report_uses_normal_file_permissions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fresh = Path(directory) / "new.json"
+            umask = os.umask(0o022)
+            try:
+                write_output(str(fresh), "{}")
+            finally:
+                os.umask(umask)
+            self.assertEqual(fresh.stat().st_mode & 0o777, 0o644)
+            existing = Path(directory) / "old.json"
+            existing.write_text("old", encoding="utf-8")
+            existing.chmod(0o640)
+            write_output(str(existing), "new")
+            self.assertEqual(existing.stat().st_mode & 0o777, 0o640)
+            self.assertEqual(existing.read_text(encoding="utf-8"), "new")
 
     def test_atomic_write_keeps_existing_file_on_failure(self):
         with tempfile.TemporaryDirectory() as directory:

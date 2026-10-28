@@ -99,6 +99,7 @@ HTTPS 默认验证证书；使用系统代理配置。请求串行执行，第�
 | `not_found` | HTTP 404 或 410 |
 | `restricted` | HTTP 401 或 403，不能据此确认资源存在 |
 | `redirect` | HTTP 3xx，记录 Location，不跟随 |
+| `server_error` | HTTP 5xx，路径可能存在但服务端出错，需要人工复查 |
 | `suspected_soft_404` | 内容接近不存在路径的响应模板，需要人工复查 |
 | `error` | HTTP 异常或其他检查失败，原因保留在错误列表中 |
 

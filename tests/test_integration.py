@@ -98,11 +98,11 @@ class IntegrationTests(unittest.TestCase):
                 "-ds", "http://example.test/app/", "-f", str(wordlist)
             ], respond)
         result = report["results"][0]
-        self.assertEqual((code, result["status"], result["checked"]), (1, "partial", 4))
+        self.assertEqual((code, result["status"], result["checked"]), (0, "success", 5))
         self.assertEqual([item["status"] for item in result["findings"]], [
-            "found", "restricted", "redirect", "not_found", "error"
+            "found", "restricted", "redirect", "not_found", "server_error"
         ])
-        self.assertIn("HTTP 500", result["errors"][0])
+        self.assertEqual(result["errors"], [])
         self.assertEqual(len(transport.requests), 7)
 
 

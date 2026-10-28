@@ -9,6 +9,7 @@ from email.message import Message
 import http.client
 import json
 import math
+import re
 import socket
 import ssl
 import time
@@ -18,6 +19,9 @@ from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_ope
 
 from . import __version__
 from .targets import parse_target
+
+
+_HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
 
 
 class RequestError(Exception):
@@ -92,13 +96,15 @@ class HttpClient:
         self._opener.close()
         self._closed = True
 
-    def get(self, url: str) -> HttpResponse:
-        return self.request("GET", url)
+    def get(self, url: str, headers: dict[str, str] | None = None) -> HttpResponse:
+        return self.request("GET", url, headers=headers)
 
-    def post(self, url: str, data: dict | None = None) -> HttpResponse:
-        return self.request("POST", url, data=data)
+    def post(self, url: str, data: dict | None = None,
+             headers: dict[str, str] | None = None) -> HttpResponse:
+        return self.request("POST", url, data=data, headers=headers)
 
-    def request(self, method: str, url: str, data: dict | None = None) -> HttpResponse:
+    def request(self, method: str, url: str, data: dict | None = None,
+                headers: dict[str, str] | None = None) -> HttpResponse:
         if self._closed:
             raise RequestError("HTTP 客户端已关闭")
         method = method.upper()
@@ -110,13 +116,19 @@ class HttpClient:
             url = parse_target(url).url
         except ValueError as exc:
             raise RequestError(str(exc), kind="invalid_url") from None
+        for key, value in (headers or {}).items():
+            if (not isinstance(key, str) or not isinstance(value, str)
+                    or not _HEADER_NAME.fullmatch(key)
+                    or any(char in value for char in "\r\n\0")):
+                raise ValueError("请求头名称或值无效")
         payload = urlencode(data or {}).encode("utf-8") if method == "POST" else None
-        headers = {"User-Agent": f"butterfly/{__version__}", "Accept-Encoding": "identity"}
+        request_headers = {"User-Agent": f"butterfly/{__version__}", "Accept-Encoding": "identity",
+                           **(headers or {})}
         if payload is not None:
-            headers["Content-Type"] = "application/x-www-form-urlencoded"
+            request_headers["Content-Type"] = "application/x-www-form-urlencoded"
         attempts = self.retries + 1 if method == "GET" else 1
         for attempt in range(attempts):
-            request = Request(url, data=payload, headers=headers, method=method)
+            request = Request(url, data=payload, headers=request_headers, method=method)
             try:
                 response = self._read_response(request)
             except RequestError as exc:

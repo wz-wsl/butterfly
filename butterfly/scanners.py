@@ -94,6 +94,15 @@ def _comparison_text(response: HttpResponse, requested_url: str) -> str:
     return " ".join(text.split())
 
 
+def _similar(template: str, candidate: str, threshold: float = 0.98) -> bool:
+    # quick ratios are cheap upper bounds of ratio(); checking them first gives
+    # the same answer while skipping the slow comparison for clearly different pages.
+    matcher = SequenceMatcher(None, template, candidate)
+    return (matcher.real_quick_ratio() >= threshold
+            and matcher.quick_ratio() >= threshold
+            and matcher.ratio() >= threshold)
+
+
 def _baseline(client: HttpClient, target: Target, result: ScanResult) -> str | None:
     samples: list[tuple[int, str]] = []
     for _ in range(2):
@@ -181,12 +190,15 @@ def scan_directory(client: HttpClient, target: Target, entries: Iterable[str]) -
                 )
         elif 200 <= code < 300:
             candidate = _comparison_text(response, url)
-            if template and candidate and SequenceMatcher(None, template, candidate).ratio() >= 0.98:
+            if template and candidate and _similar(template, candidate):
                 status, reason = "suspected_soft_404", "Content resembles two missing-path baseline responses"
             else:
                 status, reason = "found", f"HTTP {code}; response differs from the missing-path template"
                 if template is None:
                     reason = f"HTTP {code}; no reliable missing-path template was available"
+        elif 500 <= code < 600:
+            # A server error usually means the path exists but failed to run.
+            status, reason = "server_error", f"HTTP {code}; the path may exist but the server failed"
         else:
             result.errors.append(f"{url}: unexpected HTTP {code}")
             details["reason"] = f"Unexpected HTTP {code}"

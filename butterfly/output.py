@@ -80,6 +80,14 @@ def write_output(path: str, text: str) -> None:
                                          dir=destination.parent, delete=False) as stream:
             temporary = stream.name
             stream.write(text)
+        # NamedTemporaryFile is created 0600; give the report normal file permissions.
+        try:
+            mode = destination.stat().st_mode & 0o777
+        except FileNotFoundError:
+            umask = os.umask(0)
+            os.umask(umask)
+            mode = 0o666 & ~umask
+        os.chmod(temporary, mode)
         os.replace(temporary, destination)
     finally:
         if temporary and os.path.exists(temporary):

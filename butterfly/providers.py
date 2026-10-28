@@ -18,6 +18,8 @@ from .targets import Target
 
 
 PORT_PROVIDER = "https://tool.box3.cn/server/port.php"
+# The original tool sent this Referer; the service may reject requests without it.
+PORT_PROVIDER_REFERER = "https://tool.box3.cn/port.html"
 SUBDOMAIN_PROVIDER = "https://phpinfo.me/domain"
 _MAX_CONSECUTIVE_FAILURES = 3
 _LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z", re.ASCII)
@@ -97,6 +99,7 @@ def query_ports(
                     "protocol": "tcp",
                     "method": "search",
                 },
+                headers={"Referer": PORT_PROVIDER_REFERER},
             )
             is_open = _port_state(_json_response(response))
         except (RequestError, ValueError) as exc:
@@ -160,8 +163,8 @@ def _record_status(value: Any) -> int:
         status = int(value)
     else:
         raise ValueError("subdomain response contains an invalid status")
-    if status not in (200, 404):
-        raise ValueError(f"subdomain service reported record status {status}")
+    if not 100 <= status <= 599:
+        raise ValueError(f"subdomain response contains an invalid status {status}")
     return status
 
 
@@ -199,6 +202,12 @@ def query_subdomains(
     else:
         result.errors.append("Subdomain queries require a DNS hostname, not an IP address")
         return result
+    if target.hostname.startswith("www.") and target.hostname.count(".") >= 2:
+        parent = target.hostname[4:]
+        result.warnings.append(
+            f"Query base is {target.hostname}, so names like mail.{target.hostname} are checked. "
+            f"Version 0.1 removed the leading www; to query names under {parent}, pass {parent}."
+        )
 
     seen_prefixes: set[str] = set()
     seen_domains: set[str] = set()
@@ -227,7 +236,10 @@ def query_subdomains(
                     raise ValueError("subdomain response contains an out-of-scope domain")
                 status = _record_status(record["status"])
                 addresses = _addresses(record["ip"])
-                if status == 404:
+                if status != 200:
+                    # The service marks names that do not resolve with a
+                    # non-200 record status (typically 500) and "ip": null.
+                    # Such a record is a miss, not a service failure.
                     if addresses:
                         raise ValueError("subdomain response has conflicting status and IP data")
                     continue
